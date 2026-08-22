@@ -343,6 +343,31 @@ class Worker(WorkerBase):
             restore = original_value if original_value else str(_SIZE_MAX_MB)
             torch._C._accelerator_setAllocatorSettings(f"max_split_size_mb:{restore}")
 
+    def _create_model_runner(self) -> Any:
+        """Construct the worker-owned model runner.
+
+        This protected factory is the narrow out-of-tree backend seam. Worker
+        subclasses can replace the runner without duplicating device setup,
+        memory profiling, KV-cache allocation, or lifecycle ownership.
+        """
+        if self.use_v2_model_runner:
+            if self.vllm_config.is_mm_encoder_only:
+                from vllm.v1.worker.mm_encoder_model_runner import (
+                    MMEncoderModelRunner as GPUModelRunnerV2,
+                )
+            else:
+                from vllm.v1.worker.gpu.model_runner import (  # type: ignore[assignment]
+                    GPUModelRunner as GPUModelRunnerV2,
+                )
+
+            return GPUModelRunnerV2(self.vllm_config, self.device)
+
+        from vllm.v1.worker.gpu_model_runner import (
+            GPUModelRunner as GPUModelRunnerV1,
+        )
+
+        return GPUModelRunnerV1(self.vllm_config, self.device)
+
     @instrument(span_name="Init device")
     def init_device(self):
         if self.device_config.device_type == "cuda":
@@ -452,27 +477,8 @@ class Worker(WorkerBase):
             _num_workspace_lanes(self.vllm_config, self.use_v2_model_runner),
         )
 
-        # Construct the model runner
-        if self.use_v2_model_runner:
-            if self.vllm_config.is_mm_encoder_only:
-                from vllm.v1.worker.mm_encoder_model_runner import (
-                    MMEncoderModelRunner as GPUModelRunnerV2,
-                )
-            else:
-                from vllm.v1.worker.gpu.model_runner import (  # type: ignore[assignment]
-                    GPUModelRunner as GPUModelRunnerV2,
-                )
-
-            # HACK(woosuk): This is a temporary fix to avoid type errors.
-            self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
-                self.vllm_config, self.device
-            )
-        else:
-            from vllm.v1.worker.gpu_model_runner import (
-                GPUModelRunner as GPUModelRunnerV1,
-            )
-
-            self.model_runner = GPUModelRunnerV1(self.vllm_config, self.device)
+        # Construct the model runner.
+        self.model_runner: GPUModelRunner = self._create_model_runner()
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -152,3 +152,33 @@ def test_profiling_fallback_declines_off_rocm(rocm):
     result = _profile_result(consumed=-RELEASED_BY_OTHERS)
 
     assert maybe_rocm_profiling_fallback(result) is None
+
+
+@pytest.mark.parametrize(
+    ("use_v2_model_runner", "is_mm_encoder_only", "module_path"),
+    [
+        (False, False, "vllm.v1.worker.gpu_model_runner.GPUModelRunner"),
+        (True, False, "vllm.v1.worker.gpu.model_runner.GPUModelRunner"),
+        (
+            True,
+            True,
+            "vllm.v1.worker.mm_encoder_model_runner.MMEncoderModelRunner",
+        ),
+    ],
+)
+def test_gpu_worker_model_runner_factory(
+    use_v2_model_runner, is_mm_encoder_only, module_path
+):
+    """The protected factory preserves every stock runner selection."""
+    from vllm.v1.worker.gpu_worker import Worker
+
+    worker = Worker.__new__(Worker)
+    worker.use_v2_model_runner = use_v2_model_runner
+    worker.vllm_config = Mock(is_mm_encoder_only=is_mm_encoder_only)
+    worker.device = object()
+    runner = Mock()
+
+    with patch(module_path, return_value=runner) as runner_cls:
+        assert worker._create_model_runner() is runner
+
+    runner_cls.assert_called_once_with(worker.vllm_config, worker.device)
