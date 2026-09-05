@@ -388,14 +388,14 @@ def rocm_aiter_fused_experts(
                 if rocm_aiter_ops.is_fused_moe_situv2_a8w4_enabled()
                 else GateMode.SEPARATED.value
             )
-        elif quant_config.use_mxfp4_w4a16:
-            gate_mode = GateMode.INTERLEAVE.value
         elif activation_interleave is not None:
             gate_mode = (
                 GateMode.INTERLEAVE.value
                 if activation_interleave
                 else GateMode.SEPARATED.value
             )
+        elif quant_config.use_mxfp4_w4a16:
+            gate_mode = GateMode.INTERLEAVE.value
 
         return rocm_aiter_ops.fused_moe(
             hidden_states,
