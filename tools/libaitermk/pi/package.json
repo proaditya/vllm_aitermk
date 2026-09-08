@@ -1,0 +1,13 @@
+{
+  "name": "libaitermk-pi-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi coding-agent integration for the libAiterMK vLLM endpoint",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4"
+  }
+}
