@@ -1,0 +1,4 @@
+interface:
+  display_name: "libAiterMK Coding Chat"
+  short_description: "Run GPT-OSS coding chat with guarded local tools."
+  default_prompt: "Use $libaitermk-coding-chat to start a guarded coding session in this repository."
