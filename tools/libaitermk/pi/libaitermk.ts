@@ -225,7 +225,7 @@ export default function libAiterMKExtension(pi: ExtensionAPI): void {
 
 	if (!statsEnabled) return;
 
-	pi.on("before_provider_request", (_event, ctx) => {
+	pi.on("before_provider_request", (event, ctx) => {
 		step += 1;
 		request = {
 			step,
@@ -236,6 +236,23 @@ export default function libAiterMKExtension(pi: ExtensionAPI): void {
 		if (ctx.hasUI) {
 			ctx.ui.setStatus("libaitermk-metrics", `step ${step} | waiting for first token`);
 		}
+
+		if (event.payload && typeof event.payload === "object") {
+			const payload = event.payload as Record<string, unknown>;
+			const streamOptions =
+				payload.stream_options && typeof payload.stream_options === "object"
+					? (payload.stream_options as Record<string, unknown>)
+					: {};
+			return {
+				...payload,
+				stream_options: {
+					...streamOptions,
+					include_usage: true,
+					continuous_usage_stats: true,
+				},
+			};
+		}
+		return undefined;
 	});
 
 	pi.on("after_provider_response", (event) => {
