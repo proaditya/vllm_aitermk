@@ -166,9 +166,9 @@ if ! model=$(
   exit 1
 fi
 
-agent_dir=${PI_CODING_AGENT_DIR:-${repo_root}/results/libaitermk-pi/agent}
+agent_dir=${PI_CODING_AGENT_DIR:-${repo_root}/.cache/libaitermk/pi}
 session_dir=${PI_CODING_AGENT_SESSION_DIR:-${agent_dir}/sessions}
-metrics_file=${LIBAITERMK_PI_METRICS_FILE:-${repo_root}/results/libaitermk-pi/metrics.jsonl}
+metrics_file=${LIBAITERMK_PI_METRICS_FILE:-${agent_dir}/metrics.jsonl}
 mkdir -p "${agent_dir}" "${session_dir}" "$(dirname -- "${metrics_file}")"
 
 export PI_CODING_AGENT_DIR=${agent_dir}
