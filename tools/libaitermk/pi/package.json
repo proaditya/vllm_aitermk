@@ -8,6 +8,9 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.4"
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-tui": "0.84.4",
+    "pi-agent-web-access": "1.1.2",
+    "pi-token-speed": "https://github.com/proaditya/decode-speed-meter/archive/e1e139e8740fa5a166ce3a3834411c658fecee34.tar.gz"
   }
 }

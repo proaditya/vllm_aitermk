@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 WORKSPACE [Pi options]" >&2
+  echo "Usage: $0 WORKSPACE [--dangerously-skip-permissions] [--web-access] [Pi options]" >&2
   exit 2
 fi
 
@@ -13,6 +13,8 @@ repo_root=$(cd -- "${script_dir}/../.." && pwd)
 pi_dir=${script_dir}/pi
 pi_entry=${pi_dir}/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js
 extension=${pi_dir}/libaitermk.ts
+speed_extension=${pi_dir}/node_modules/pi-token-speed/index.ts
+web_extension=${pi_dir}/node_modules/pi-agent-web-access/index.ts
 workspace=$1
 shift
 
@@ -25,9 +27,10 @@ endpoint=${VLLM_CHAT_URL:-http://127.0.0.1:8000/v1}
 api_key=${VLLM_CHAT_API_KEY:-EMPTY}
 max_tokens=${VLLM_CHAT_MAX_TOKENS:-4096}
 context_window=${VLLM_CHAT_CONTEXT_WINDOW:-65536}
-write_policy=${LIBAITERMK_PI_WRITE_POLICY:-ask}
-shell_policy=${LIBAITERMK_PI_SHELL_POLICY:-ask}
+write_policy=ask
+shell_policy=ask
 stats=${LIBAITERMK_PI_STATS:-0}
+web_access=0
 pi_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -80,6 +83,15 @@ while [[ $# -gt 0 ]]; do
       shell_policy=${1#*=}
       shift
       ;;
+    --dangerously-skip-permissions)
+      write_policy=allow
+      shell_policy=allow
+      shift
+      ;;
+    --web-access)
+      web_access=1
+      shift
+      ;;
     --stats)
       stats=1
       shift
@@ -117,6 +129,16 @@ if ! "${node_bin}" -e '
 fi
 if [[ ! -f "${pi_entry}" ]]; then
   echo "Pi is not installed under ${pi_dir}" >&2
+  echo "Run: cd ${pi_dir} && npm ci" >&2
+  exit 1
+fi
+if [[ "${stats}" == "1" && ! -f "${speed_extension}" ]]; then
+  echo "The decode-speed meter is not installed under ${pi_dir}" >&2
+  echo "Run: cd ${pi_dir} && npm ci" >&2
+  exit 1
+fi
+if [[ "${web_access}" == "1" && ! -f "${web_extension}" ]]; then
+  echo "The web-access extension is not installed under ${pi_dir}" >&2
   echo "Run: cd ${pi_dir} && npm ci" >&2
   exit 1
 fi
@@ -161,10 +183,20 @@ export LIBAITERMK_PI_SHELL_POLICY=${shell_policy}
 export LIBAITERMK_PI_STATS=${stats}
 export LIBAITERMK_PI_METRICS_FILE=${metrics_file}
 
+extension_args=(--extension "${extension}")
+if [[ "${stats}" == "1" ]]; then
+  extension_args+=(--extension "${speed_extension}")
+fi
+if [[ "${web_access}" == "1" ]]; then
+  extension_args+=(--extension "${web_extension}")
+fi
+
+echo "Pi permissions: write=${write_policy}, shell=${shell_policy}, web_access=${web_access}" >&2
+
 cd -- "${workspace}"
 exec "${node_bin}" "${pi_entry}" \
   --no-extensions \
-  --extension "${extension}" \
+  "${extension_args[@]}" \
   --provider libaitermk-vllm \
   --model "${model}" \
   --thinking off \

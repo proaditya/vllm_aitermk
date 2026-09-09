@@ -8,8 +8,9 @@ endpoint launcher and Pi launcher run inside the same prepared GPU environment.
 Neither launcher creates, starts, selects, or otherwise manages a container.
 
 The prepared container is responsible for providing the repository Python
-environment and Node.js 22.19 or newer with npm. Pi is not vendored into the
-container image: its pinned dependencies are installed under
+environment and Node.js 22.19 or newer with npm. Pi and the pinned
+`decode-speed-meter` extension are not vendored into the container image: their
+dependencies are installed under
 `tools/libaitermk/pi/node_modules/` with `npm ci --omit=optional
 --ignore-scripts`.
 
@@ -35,6 +36,7 @@ The endpoint and Pi context-window defaults are both 65,536 tokens.
 | `tools/libaitermk/start_endpoint.sh` | Start the local vLLM/libAiterMK endpoint and retain logs and evidence. |
 | `tools/libaitermk/start_pi_chat.sh` | Validate the endpoint and launch Pi for an explicit workspace. |
 | `tools/libaitermk/pi/libaitermk.ts` | Register the OpenAI-compatible endpoint, policies, and metrics with Pi. |
+| Pinned `pi-token-speed` GitHub dependency | Display an estimated live decode-speed graph when `--stats` is selected. |
 | `tools/libaitermk/coding_chat.py` | Retained lightweight diagnostic client; not the primary interactive path. |
 | `redline_vllm` | Select the libAiterMK worker, scheduler, runtime, and provider. |
 | vLLM | Own HTTP serving, tokenization, prefill, scheduling, prefix caching, sampling, and responses. |
@@ -75,6 +77,7 @@ The corresponding environment overrides are `VLLM_SERVER_PYTHON`,
 - `REDLINE_VLLM_RUNTIME_API=c_v1`
 - `VLLM_USE_V2_MODEL_RUNNER=0`
 - `REDLINE_VLLM_ENABLE_QUANTUM_K8=1`
+- `VLLM_ROCM_USE_AITER=1` for the stock GPT-OSS prefill path
 - BF16 KV cache with 64-token physical blocks
 - one sequence, eager execution, synchronous scheduling
 - chunked prefill and the hybrid KV manager disabled
@@ -108,6 +111,13 @@ default shell policy.
 
 The client uses the normal OpenAI-compatible chat API. The server remains a
 standard vLLM endpoint; libAiterMK changes model execution, not the API shape.
+
+When `--stats` is selected, the launcher explicitly loads the pinned
+`pi-token-speed` extension in addition to `libaitermk.ts`. Its live graph is an
+estimate derived from Pi transport deltas. The final metrics emitted by
+`libaitermk.ts` use endpoint usage and remain authoritative. Keeping the two
+roles separate avoids copying the external extension source into this
+repository or weakening the exact metrics path.
 
 ## Prefix-cache behavior
 

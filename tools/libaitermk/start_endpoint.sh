@@ -123,6 +123,7 @@ fi
 
 cd -- "${repo_root}"
 nohup env \
+  VLLM_ROCM_USE_AITER=1 \
   VLLM_PLUGINS=redline_megakernel \
   REDLINE_VLLM_ENABLE=1 \
   REDLINE_VLLM_MODE=direct \

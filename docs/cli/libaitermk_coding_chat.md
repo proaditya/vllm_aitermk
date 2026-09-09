@@ -57,9 +57,21 @@ to 131,072 positions. This is a startup-time setting, so changing it requires
 restarting the endpoint.
 
 The launcher selects the default B1/K8 BF16 provider. K8 is the maximum native
-decode quantum: eligible calls may emit 1, 2, 4, or 8 tokens. Harmony requests
-with multiple effective stop-token IDs are currently reduced to K1 by the
-scheduler's stop-safety policy, even though the installed provider supports K8.
+decode quantum: eligible calls may emit 1, 2, 4, or 8 tokens. For Harmony
+requests with multiple effective stop-token IDs, the native controller returns
+a bounded slice with EOS comparison disabled and vLLM scans that slice in
+order, publishing through the first stop token and discarding the tail.
+
+The launcher also enables vLLM's AITER kernels for stock GPT-OSS prefill. This
+does not replace the Redline decode provider: vLLM still owns prefill and
+Redline still owns eligible decode. On the validated MI355X setup, a controlled
+two-step Pi tool turn reduced aggregate warmed server prefill time from 617 ms
+with the Triton MXFP4 MoE backend to 202 ms with `AITER_MXFP4_BF16` for the
+same 346 newly computed prompt tokens. The first request for a new AITER
+attention shape can still include one-time JIT latency; subsequent tool steps
+in the validation run reached 49-59 ms TTFT. Prefix-cache hits remain important
+because every new tool result or user turn still has to be ingested before
+decoding can begin.
 
 Packaged deployments load the installed `redline_vllm` adapter. For local
 adapter development, set `REDLINE_VLLM_ADAPTER_PATH` to the directory containing
@@ -67,8 +79,9 @@ the `redline_vllm` package; the helper prepends it to the existing `PYTHONPATH`.
 
 ## Pi interactive coding chat
 
-Pi is pinned to `@earendil-works/pi-coding-agent` 0.84.4. It requires Node.js
-22.19 or newer. Install the pinned dependency once:
+Pi is pinned to `@earendil-works/pi-coding-agent` 0.84.4. The live decode-speed
+extension is installed from a pinned `decode-speed-meter` GitHub revision. Both
+require Node.js 22.19 or newer. Install the pinned dependencies once:
 
 ```bash
 cd tools/libaitermk/pi
@@ -116,14 +129,49 @@ only in an appropriately isolated workspace:
 --write-policy allow --shell-policy allow
 ```
 
+For unattended operation, one CLI switch enables both policies:
+
+```bash
+tools/libaitermk/start_pi_chat.sh "$PWD" \
+  --dangerously-skip-permissions \
+  --stats
+```
+
+The policy is fixed when Pi starts. Exit and relaunch Pi when changing it.
+The launcher prints the active write, shell, and web-access policies before
+the interactive UI starts.
+
+Web access is optional. Enable the pinned `pi-agent-web-access` extension with:
+
+```bash
+tools/libaitermk/start_pi_chat.sh "$PWD" --web-access
+```
+
+This adds `web_search` and `fetch_content`. Direct URL fetching requires no
+search API key. Search uses `EXA_API_KEY` or `BRAVE_API_KEY` when supplied and
+can otherwise use Exa's zero-configuration MCP fallback. Combine web access
+with unattended operation only in a controlled container:
+
+```bash
+tools/libaitermk/start_pi_chat.sh "$PWD" \
+  --dangerously-skip-permissions \
+  --web-access \
+  --stats
+```
+
 Approved shell commands are not filesystem-confined. The workspace boundary
 is enforced for Pi's file tools; retain `--shell-policy ask` unless the
 container or workspace provides an additional sandbox.
 
-With `--stats`, the footer updates while the response streams and the completed
-model step displays exact endpoint token usage, TTFT, TPOT, decode throughput,
-and end-to-end throughput. `/libaitermk-metrics` restores the most recent
-completed metrics display. Metrics are appended as JSON lines to:
+With `--stats`, Pi also loads the pinned `pi-token-speed` extension. It displays
+a live terminal decode-speed graph with estimated Now/Mean/Peak rates. Use
+`/tps` inside Pi to configure or toggle that display. npm downloads the pinned
+GitHub source archive; its source is not copied into this repository.
+
+The libAiterMK footer continues to update while the response streams, and the
+completed model step displays exact endpoint token usage, TTFT, TPOT, decode
+throughput, and end-to-end throughput. `/libaitermk-metrics` restores the most
+recent completed metrics display. Metrics are appended as JSON lines to:
 
 ```text
 results/libaitermk-pi/metrics.jsonl
@@ -135,11 +183,13 @@ agent state directly in the user's home directory. Override
 `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, or
 `LIBAITERMK_PI_METRICS_FILE` when a different location is required.
 
-Pi's live stream counter is a count of received stream delta events, not an
-exact tokenizer count. The final prompt/output counts and derived metrics use
-the endpoint's streamed usage record and are exact. Tool-enabled GPT-OSS chat
-can still use one-token Redline quantums because of the Harmony multi-stop
-behavior; client-side TPS must not be treated as proof that K8 executed.
+The decode-speed graph estimates tokens from Pi transport deltas, which are not
+tokenizer events and do not include provider timestamps. It is useful for live
+shape and responsiveness, but the final libAiterMK prompt/output counts and
+derived metrics use the endpoint's streamed usage record and remain the
+authoritative measurements. Tool-enabled GPT-OSS chat can still use one-token
+Redline quantums near output or page boundaries. Client-side TPS and SSE chunk
+counts must not be treated as proof of the effective native quantum.
 
 The endpoint has a vLLM-owned KV cache for each active request, so decode does
 not recompute the entire prompt for every generated token. B=1 direct-KV

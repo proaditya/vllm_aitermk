@@ -178,6 +178,7 @@ def test_endpoint_launcher_has_no_container_or_machine_path_assumptions() -> Non
     assert "${repo_root}/.venv/bin/python" in source
     assert "${repo_root}/results/libaitermk-coding-chat/endpoint" in source
     assert "${repo_root}/results/libaitermk-coding-chat/cache" in source
+    assert "VLLM_ROCM_USE_AITER=1" in source
     assert "REDLINE_VLLM_ENABLE_QUANTUM_K8=1" in source
     assert "REDLINE_VLLM_ENABLE_QUANTUM_K1=1" not in source
 
@@ -194,6 +195,35 @@ def test_pi_launcher_only_connects_to_an_existing_endpoint() -> None:
         assert forbidden not in source
     assert "models_url=${endpoint%/}/models" in source
     assert "export VLLM_CHAT_MODEL=${model}" in source
+
+
+def test_pi_launcher_loads_speed_meter_only_with_stats() -> None:
+    source = (REPO_ROOT / "tools/libaitermk/start_pi_chat.sh").read_text()
+    assert "node_modules/pi-token-speed/index.ts" in source
+    assert 'if [[ "${stats}" == "1" ]]' in source
+    assert 'extension_args+=(--extension "${speed_extension}")' in source
+
+    package = json.loads(
+        (REPO_ROOT / "tools/libaitermk/pi/package.json").read_text()
+    )
+    assert package["dependencies"]["@earendil-works/pi-tui"] == "0.84.4"
+    assert package["dependencies"]["pi-token-speed"].endswith(
+        "/e1e139e8740fa5a166ce3a3834411c658fecee34.tar.gz"
+    )
+
+
+def test_pi_launcher_supports_unattended_permissions_and_web_access() -> None:
+    source = (REPO_ROOT / "tools/libaitermk/start_pi_chat.sh").read_text()
+    assert "--dangerously-skip-permissions)" in source
+    assert "write_policy=allow" in source
+    assert "shell_policy=allow" in source
+    assert "--web-access)" in source
+    assert "node_modules/pi-agent-web-access/index.ts" in source
+
+    package = json.loads(
+        (REPO_ROOT / "tools/libaitermk/pi/package.json").read_text()
+    )
+    assert package["dependencies"]["pi-agent-web-access"] == "1.1.2"
 
 
 def test_stats_include_decode_tpot(
