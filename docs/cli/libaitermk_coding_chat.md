@@ -1,14 +1,28 @@
 # libAiterMK coding chat
 
-`tools/libaitermk/coding_chat.py` is a workspace-scoped coding client for a
-running OpenAI-compatible vLLM endpoint. It gives a tool-capable model bounded
-file operations and policy-controlled shell execution without changing the
-standard `vllm chat` command.
+Pi is the primary agentic-chat interface. The repository integration lives
+under `tools/libaitermk/pi/` and provides an interactive terminal UI, saved
+sessions, context compaction, cancellation, and built-in coding tools.
 
-The repository also includes an optional Pi coding-agent integration under
-`tools/libaitermk/pi/`. Pi provides a richer interactive terminal UI, saved
-sessions, context compaction, cancellation, and built-in coding tools. The
-original Python client remains the smaller diagnostic and benchmark client.
+`tools/libaitermk/coding_chat.py` remains a smaller diagnostic client. It is
+not the normal interactive entry point.
+
+## Container prerequisites
+
+The prepared GPU container must provide:
+
+- the repository's Python environment at `.venv/`;
+- Node.js 22.19 or newer, including `npm`; and
+- access to the source-model and compiled-checkpoint directories.
+
+Node.js must be installed inside the same container that runs the endpoint and
+Pi. The current setup is validated with Node.js 22.23.2 and npm 10.9.8. Confirm
+the runtime before installing Pi:
+
+```bash
+node --version
+npm --version
+```
 
 ## Server requirements
 
@@ -19,70 +33,37 @@ GPT-OSS tool calls require the server flags:
 --tool-call-parser openai
 ```
 
-For libAiterMK, start the server with the Redline worker, scheduler, provider,
-KV-cache profile, and compiled-checkpoint environment already configured. The
-repository helper can start an existing configured container:
+Run the launcher from inside the already configured GPU container. It starts
+the endpoint in the current container and never invokes Docker or selects a
+container by name. The two external model directories are required inputs:
 
 ```bash
-LIBAITERMK_CONTAINER=ssharma4-libaitermk \
-VLLM_CHAT_URL=http://127.0.0.1:8005/v1 \
-tools/libaitermk/start_endpoint.sh
+cd /path/to/vllm-checkout
+tools/libaitermk/start_endpoint.sh \
+  --model /path/to/source-model \
+  --compiled-checkpoint /path/to/compiled-checkpoint
 ```
 
-The helper does not create or configure a Docker container. It starts the
-container if necessary and launches `vllm serve` inside it. By default, server
-logs and Redline evidence are written below
-`vllm_aitermk/results/libaitermk-coding-chat/endpoint/` through the repository
-mount at `/workspace/vllm_aitermk`. Override `VLLM_RESULT_DIR` only when the
-container uses a different repository mount.
+The Python executable defaults to `.venv/bin/python` relative to the repository
+root. Server logs and Redline evidence default to
+`results/libaitermk-coding-chat/endpoint/`, also relative to the repository
+root. TorchInductor and Triton caches default below
+`results/libaitermk-coding-chat/cache/`. Override `VLLM_SERVER_PYTHON`,
+`VLLM_RESULT_DIR`, or `VLLM_CACHE_DIR` only when needed.
 
 The endpoint defaults to a 65,536-token context window. Override it at server
-startup with `VLLM_MAX_MODEL_LEN`; the GPT-OSS model and Redline runtime support
-up to 131,072 positions. This is a startup-time setting, so changing it requires
+startup with `--max-model-len`; the GPT-OSS model and Redline runtime support up
+to 131,072 positions. This is a startup-time setting, so changing it requires
 restarting the endpoint.
 
+The launcher selects the default B1/K8 BF16 provider. K8 is the maximum native
+decode quantum: eligible calls may emit 1, 2, 4, or 8 tokens. Harmony requests
+with multiple effective stop-token IDs are currently reduced to K1 by the
+scheduler's stop-safety policy, even though the installed provider supports K8.
+
 Packaged deployments load the installed `redline_vllm` adapter. For local
-adapter development, set `REDLINE_VLLM_ADAPTER_PATH` to a container-visible
-directory containing the `redline_vllm` package; the helper prepends it to the
-container's existing `PYTHONPATH`.
-
-The compiled checkpoint defaults to `/compiled-checkpoint` inside the
-container. Override it with `REDLINE_COMPILED_MODEL_PATH` when the deployment
-mount uses a different container-visible path.
-
-## Start coding chat
-
-Use the vLLM fork as the workspace:
-
-```bash
-LIBAITERMK_CONTAINER=ssharma4-libaitermk \
-VLLM_CHAT_URL=http://127.0.0.1:8005/v1 \
-tools/libaitermk/start_coding_chat.sh \
-  /home/ssharma4/vllm_aitermk \
-  --model-name gpt-oss-120b \
-  --write-policy ask \
-  --shell-policy ask \
-  --stats
-```
-
-Or call the Python client when the endpoint is already running:
-
-```bash
-.venv/bin/python tools/libaitermk/coding_chat.py \
-  --url http://127.0.0.1:8005/v1 \
-  --model-name gpt-oss-120b \
-  --workspace /home/ssharma4/vllm_aitermk \
-  --write-policy ask \
-  --shell-policy ask
-```
-
-The familiar vLLM chat options are `--url`, `--model-name`, `--api-key`,
-`--system-prompt`, `-q`/`--quick`, and `--stats`.
-
-With `--stats`, every model step reports TTFT, end-to-end output TPS, and TPOT.
-TPOT excludes TTFT and is calculated over tokens after the first generated
-token, so it is the appropriate decode-latency metric. The displayed `TPS`
-continues to include TTFT.
+adapter development, set `REDLINE_VLLM_ADAPTER_PATH` to the directory containing
+the `redline_vllm` package; the helper prepends it to the existing `PYTHONPATH`.
 
 ## Pi interactive coding chat
 
@@ -94,9 +75,8 @@ cd tools/libaitermk/pi
 npm ci --omit=optional --ignore-scripts
 ```
 
-The current Docker image does not include Node.js by default. Install Node.js
-22.19 or newer in the image or container before running `npm ci`. `node_modules`
-is local installation state and is not committed.
+`node_modules` is local installation state and is not committed. A replacement
+container therefore needs Node.js installed and this `npm ci` step repeated.
 
 With optional clipboard support omitted, the installed Pi dependency closure
 is approximately 135 MB. The complete portable Node.js 22.23.2 distribution
@@ -104,35 +84,26 @@ used in the current local container is approximately 204 MB. A system Node.js
 installation may have a different footprint. Pi is MIT licensed; the local
 launcher and extension use the repository's Apache-2.0 license.
 
-Run Pi inside the configured container, where the endpoint is available on
-port 8000 and the repository is mounted at `/workspace/vllm_aitermk`:
+From the repository root inside the same container, start Pi against the local
+endpoint and choose the workspace it may inspect and modify:
 
 ```bash
-docker exec -it ssharma4-libaitermk \
-  /workspace/vllm_aitermk/tools/libaitermk/start_pi_chat.sh \
-  /workspace/vllm_aitermk/results/coding-chat-workspace \
-  --url http://127.0.0.1:8000/v1 \
-  --model-name gpt-oss-120b \
-  --max-model-len 65536 \
-  --write-policy ask \
-  --shell-policy ask \
-  --max-tokens 4096 \
-  --stats
+tools/libaitermk/start_pi_chat.sh "$PWD" --stats
 ```
 
-The current `ssharma4-libaitermk` container has Node.js 22.23.2 installed at
-`/opt/libaitermk-node`, with `node`, `npm`, and `npx` available through
-`/usr/local/bin`. This is a change to that container, not to its source image;
-a newly created container must install Node.js again. On the first interactive
-launch, Pi asks whether to trust the workspace. Pi may also download `rg` and
-`fd` into the repository-local agent directory.
+On the first interactive launch, Pi asks whether to trust the workspace. Pi
+may also download `rg` and `fd` into the repository-local agent directory.
 
-The wrapper accepts the familiar vLLM-style options `--url`, `--model-name`,
-`--api-key`, `--max-model-len`, `--max-tokens`, `--system-prompt`,
-`-q`/`--quick`, and `--stats`. `--max-model-len` tells Pi the endpoint context
-window and defaults to 65,536; it does not change an already-running server.
-Other options are passed directly to Pi. For example, use `--no-session` for
-an ephemeral conversation or `--continue` to continue the most recent one.
+The Pi launcher accepts the familiar client options `--url`, `--api-key`,
+`--max-model-len`, `--max-tokens`, `--system-prompt`, `-q`/`--quick`, and
+`--stats`. `--max-model-len` tells Pi the endpoint context window and defaults
+to 65,536; it does not change an already-running server. Other options are
+passed directly to Pi. For example, use `--no-session` for an ephemeral
+conversation or `--continue` to continue the most recent one.
+
+Pi queries the endpoint's standard `/v1/models` API and uses the first served
+model ID. That ID is required in OpenAI chat requests, but it does not need to
+be supplied manually for this single-model endpoint.
 
 The libAiterMK Pi extension registers the endpoint as the
 `libaitermk-vllm` provider and enables Pi's built-in `read`, `bash`, `edit`,
@@ -155,7 +126,7 @@ and end-to-end throughput. `/libaitermk-metrics` restores the most recent
 completed metrics display. Metrics are appended as JSON lines to:
 
 ```text
-vllm_aitermk/results/libaitermk-pi/metrics.jsonl
+results/libaitermk-pi/metrics.jsonl
 ```
 
 Pi sessions and configuration also default below
@@ -194,23 +165,13 @@ Available tools are `list_files`, `read_file`, `search_files`, `write_file`,
 `replace_text`, `make_directory`, and `run_command`. Deletion is intentionally
 not exposed in the first version.
 
-## Current local checkpoints
+## Deployment inputs
 
-The current local endpoint loads the base model from:
+The endpoint launcher's `--model` and `--compiled-checkpoint` arguments must
+point to complete, container-visible directories. The launcher deliberately
+has no machine-local fallback for either path. It passes the compiled
+checkpoint into the provider's internal runtime environment.
 
-```text
-/models/openai/gpt-oss-120b
-```
-
-The Redline ABI-4 checkpoint is expected at `/compiled-checkpoint` inside the
-container. The qualified artifact is retained on Fleet in run
-`job-bcedc612` at:
-
-```text
-team-admin-1/compiled/gpt-oss-120b-p2-gfx950-tp1-abi4-b9e3-v3
-```
-
-For local Docker use, mount a complete copy at `/compiled-checkpoint`; a broken
-or empty compatibility mount will make the engine fail during startup. These
-paths belong to the deployment. The coding client only connects to the endpoint
-and does not load either checkpoint directly.
+The Pi launcher receives neither path. It only needs the endpoint URL and
+discovers the served model ID through `/v1/models` before sending chat
+requests.
