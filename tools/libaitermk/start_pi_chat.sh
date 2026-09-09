@@ -22,7 +22,6 @@ if [[ ! -d "${workspace}" ]]; then
 fi
 
 endpoint=${VLLM_CHAT_URL:-http://127.0.0.1:8000/v1}
-model=${VLLM_CHAT_MODEL:-gpt-oss-120b}
 api_key=${VLLM_CHAT_API_KEY:-EMPTY}
 max_tokens=${VLLM_CHAT_MAX_TOKENS:-4096}
 context_window=${VLLM_CHAT_CONTEXT_WINDOW:-65536}
@@ -39,14 +38,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --url=*)
       endpoint=${1#*=}
-      shift
-      ;;
-    --model-name)
-      model=$2
-      shift 2
-      ;;
-    --model-name=*)
-      model=${1#*=}
       shift
       ;;
     --api-key)
@@ -104,15 +95,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ${LIBAITERMK_START_ENDPOINT:-0} == 1 ]]; then
-  VLLM_CHAT_URL=${endpoint} "${script_dir}/start_endpoint.sh"
-fi
-
 health_url=${endpoint%/}
 health_url=${health_url%/v1}/health
 if ! curl -fsS --max-time 2 "${health_url}" >/dev/null; then
   echo "Endpoint is not healthy at ${endpoint}" >&2
-  echo "Start it first, or set LIBAITERMK_START_ENDPOINT=1 on the Docker host." >&2
+  echo "Start the vLLM endpoint before launching Pi." >&2
   exit 1
 fi
 
@@ -131,6 +118,29 @@ fi
 if [[ ! -f "${pi_entry}" ]]; then
   echo "Pi is not installed under ${pi_dir}" >&2
   echo "Run: cd ${pi_dir} && npm ci" >&2
+  exit 1
+fi
+
+models_url=${endpoint%/}/models
+if ! model=$(
+  curl -fsS --max-time 10 \
+    -H "Authorization: Bearer ${api_key}" \
+    "${models_url}" \
+    | "${node_bin}" -e '
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", chunk => { input += chunk; });
+      process.stdin.on("end", () => {
+        const models = JSON.parse(input).data;
+        if (!Array.isArray(models) || models.length === 0 || !models[0].id) {
+          console.error("The endpoint returned no served model ID.");
+          process.exit(1);
+        }
+        process.stdout.write(String(models[0].id));
+      });
+    '
+); then
+  echo "Unable to discover the served model from ${models_url}" >&2
   exit 1
 fi
 
