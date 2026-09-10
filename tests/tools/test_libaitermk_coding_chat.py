@@ -112,6 +112,8 @@ def test_pi_launcher_optional_extensions_are_pinned() -> None:
 def test_pi_launcher_supports_explicit_unattended_permissions() -> None:
     source = (REPO_ROOT / "tools/libaitermk/start_pi_chat.sh").read_text()
     assert "--dangerously-skip-permissions)" in source
+    assert "write_policy=${LIBAITERMK_PI_WRITE_POLICY:-ask}" in source
+    assert "shell_policy=${LIBAITERMK_PI_SHELL_POLICY:-ask}" in source
     assert "write_policy=allow" in source
     assert "shell_policy=allow" in source
     assert 'echo "Pi permissions:' in source
