@@ -21,6 +21,7 @@ This file only keeps the MoE-shaped integration angle for those helpers.
 import importlib
 import math
 import warnings
+from types import SimpleNamespace
 from typing import Any, NamedTuple
 
 import pytest
@@ -370,9 +371,9 @@ def _make_aiter_mxfp4_moe_case(
     ) = convert_gpt_oss_weight_to_mxfp4_moe_kernel_format(
         mxfp4_backend=Mxfp4MoeBackend.AITER,
         layer=torch.nn.Module(),
-        # w13 rows must be gpt-oss-interleaved; the converter de-interleaves them
-        # back to the contiguous gate/up blocks that ``w1_ref`` / ``ref_moe_forward``
-        # use. w2 has no gate/up split, so it stays as-is.
+        # w13 rows must be gpt-oss-interleaved; the converter de-interleaves
+        # them back to the contiguous gate/up blocks that ``w1_ref`` /
+        # ``ref_moe_forward`` use. w2 has no gate/up split, so it stays as-is.
         w13_weight=_interleave_gate_up_rows(w1_q),
         w2_weight=w2_q.clone(),
         w13_weight_scale=_interleave_gate_up_rows(w1_scale),
@@ -664,6 +665,65 @@ def test_aiter_fused_moe_mi350_mxfp4_w4a16_accuracy():
         pass_rate=0.99,
         max_violation_factor=2.0,
     )
+
+
+@pytest.mark.skipif(not on_gfx950(), reason="gfx950 ROCm only")
+def test_aiter_fused_moe_mi350_mxfp4_uninterleaved_selects_separated_gate_mode(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Explicit un-interleaved activation overrides the W4A16 default."""
+    from vllm._aiter_ops import rocm_aiter_ops
+    from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+    from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
+        rocm_aiter_fused_experts,
+    )
+
+    _assert_aiter_supported()
+    observed: dict[str, Any] = {}
+
+    def fake_fused_moe(*args, **kwargs):
+        observed.update(kwargs)
+        return args[0]
+
+    monkeypatch.setattr(rocm_aiter_ops, "fused_moe", fake_fused_moe)
+    quant_config = SimpleNamespace(
+        per_act_token_quant=False,
+        use_mxfp4_w4a4=False,
+        use_mxfp4_w4a16=True,
+        block_shape=None,
+        use_fp8_w8a8=False,
+        per_out_ch_quant=False,
+        w1_scale=None,
+        w2_scale=None,
+        a1_scale=None,
+        a2_scale=None,
+        w1_bias=None,
+        w2_bias=None,
+    )
+    moe_config = SimpleNamespace(
+        hidden_dim_unpadded=4,
+        intermediate_size_per_partition=8,
+        intermediate_size_per_partition_unpadded=8,
+        intermediate_pad=None,
+        tp_size=1,
+        activation_situ_beta=None,
+        activation_situ_linear_beta=None,
+    )
+    hidden_states = torch.empty((1, 4), dtype=torch.bfloat16)
+    out = rocm_aiter_fused_experts(
+        hidden_states=hidden_states,
+        w1=torch.empty((1, 16, 4), dtype=torch.uint8),
+        w2=torch.empty((1, 4, 8), dtype=torch.uint8),
+        topk_weights=torch.ones((1, 1), dtype=torch.float32),
+        topk_ids=torch.zeros((1, 1), dtype=torch.int32),
+        activation=MoEActivation.SWIGLUOAI_UNINTERLEAVE,
+        quant_config=quant_config,
+        moe_config=moe_config,
+        expert_mask=None,
+    )
+
+    assert out is hidden_states
+    assert observed["gate_mode"] == "separated"
 
 
 @pytest.mark.skipif(not on_gfx950(), reason="gfx950 ROCm only")
