@@ -104,7 +104,7 @@ def test_pi_launcher_optional_extensions_are_pinned() -> None:
     assert package["dependencies"]["@earendil-works/pi-coding-agent"] == "0.84.4"
     assert package["dependencies"]["pi-agent-web-access"] == "1.1.2"
     assert package["dependencies"]["pi-token-speed"].endswith(
-        "/a81f6e1da6052eb2225e8698ae1600e9a99c2503.tar.gz"
+        "/d317584e522c82eaf62c473a518b9e7862f71a92.tar.gz"
     )
     assert package["dependencies"]["tsx"] == "4.23.13"
 
