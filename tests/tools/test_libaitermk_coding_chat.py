@@ -124,4 +124,18 @@ def test_browser_launcher_reuses_pi_and_stays_in_the_current_container() -> None
     assert "PI_SPEED_DEMO_HOST=${PI_SPEED_DEMO_HOST:-0.0.0.0}" in source
     assert "PI_BIN=${script_dir}/start_pi_chat.sh" in source
     assert "LIBAITERMK_PI_STATS=1" in source
-    assert 'exec "${tsx}" demo/server.ts' in source
+    assert '"${tsx}" demo/server.ts &' in source
+    assert "browser.pid" in source
+    assert "--stop)" in source
+
+
+def test_browser_launcher_stop_is_idempotent(tmp_path: Path) -> None:
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "tools/libaitermk/start_pi_browser.sh"), "--stop"],
+        env={"PATH": "/usr/bin:/bin", "LIBAITERMK_PI_RUN_DIR": str(tmp_path)},
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "Pi browser is not running" in result.stdout
