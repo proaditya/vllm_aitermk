@@ -41,6 +41,18 @@ def test_endpoint_launcher_requires_compiled_checkpoint(tmp_path: Path) -> None:
     assert "--compiled-checkpoint must name" in result.stderr
 
 
+def test_endpoint_launcher_stop_is_idempotent(tmp_path: Path) -> None:
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "tools/libaitermk/start_endpoint.sh"), "--stop"],
+        env={"PATH": "/usr/bin:/bin", "VLLM_RESULT_DIR": str(tmp_path)},
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "Endpoint is not running" in result.stdout
+
+
 def test_endpoint_launcher_has_portable_defaults() -> None:
     source = (REPO_ROOT / "tools/libaitermk/start_endpoint.sh").read_text()
     for forbidden in (
@@ -92,8 +104,9 @@ def test_pi_launcher_optional_extensions_are_pinned() -> None:
     assert package["dependencies"]["@earendil-works/pi-coding-agent"] == "0.84.4"
     assert package["dependencies"]["pi-agent-web-access"] == "1.1.2"
     assert package["dependencies"]["pi-token-speed"].endswith(
-        "/e1e139e8740fa5a166ce3a3834411c658fecee34.tar.gz"
+        "/a81f6e1da6052eb2225e8698ae1600e9a99c2503.tar.gz"
     )
+    assert package["dependencies"]["tsx"] == "4.23.13"
 
 
 def test_pi_launcher_supports_explicit_unattended_permissions() -> None:
@@ -102,3 +115,13 @@ def test_pi_launcher_supports_explicit_unattended_permissions() -> None:
     assert "write_policy=allow" in source
     assert "shell_policy=allow" in source
     assert 'echo "Pi permissions:' in source
+
+
+def test_browser_launcher_reuses_pi_and_stays_in_the_current_container() -> None:
+    source = (REPO_ROOT / "tools/libaitermk/start_pi_browser.sh").read_text()
+    for forbidden in ("docker ", "/workspace/", "/home/", "node:22"):
+        assert forbidden not in source
+    assert "PI_SPEED_DEMO_HOST=${PI_SPEED_DEMO_HOST:-0.0.0.0}" in source
+    assert "PI_BIN=${script_dir}/start_pi_chat.sh" in source
+    assert "LIBAITERMK_PI_STATS=1" in source
+    assert 'exec "${tsx}" demo/server.ts' in source

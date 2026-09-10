@@ -8,6 +8,7 @@ repo_root=$(cd -- "${script_dir}/../.." && pwd)
 
 model_path=
 compiled_model_path=
+action=start
 python_bin=${VLLM_SERVER_PYTHON:-${repo_root}/.venv/bin/python}
 server_port=${VLLM_SERVER_PORT:-8000}
 endpoint=${VLLM_CHAT_URL:-http://127.0.0.1:${server_port}/v1}
@@ -22,12 +23,14 @@ health_url=${health_url%/v1}/health
 usage() {
   cat <<EOF
 Usage: $0 --model PATH --compiled-checkpoint PATH [options]
+       $0 --stop
 
 Options:
   --model PATH                 Source model directory
   --compiled-checkpoint PATH   libAiterMK compiled checkpoint directory
   --served-model-name NAME     API model name (default: source directory name)
   --max-model-len TOKENS       Context window (default: 65536)
+  --stop                       Stop the endpoint started by this script
   -h, --help                   Show this help
 EOF
 }
@@ -66,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       max_model_len=${1#*=}
       shift
       ;;
+    --stop)
+      action=stop
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -77,6 +84,43 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+pid_file=${result_base%/}/server.pid
+active_run_file=${result_base%/}/active_run
+
+if [[ "${action}" == "stop" ]]; then
+  if [[ ! -f "${pid_file}" ]]; then
+    echo "Endpoint is not running: no managed PID file at ${pid_file}"
+    exit 0
+  fi
+
+  IFS= read -r server_pid <"${pid_file}"
+  if [[ ! "${server_pid}" =~ ^[0-9]+$ ]] || ! kill -0 "${server_pid}" 2>/dev/null; then
+    rm -f -- "${pid_file}" "${active_run_file}"
+    echo "Endpoint is not running; removed stale launcher state."
+    exit 0
+  fi
+
+  server_command=$(ps -o args= -p "${server_pid}" 2>/dev/null || true)
+  if [[ "${server_command}" != *"vllm.entrypoints.cli.main serve"* ]]; then
+    echo "Refusing to stop PID ${server_pid}: it is not a vLLM server started by this launcher." >&2
+    exit 1
+  fi
+
+  kill -TERM "${server_pid}"
+  for _ in $(seq 1 60); do
+    server_state=$(ps -o stat= -p "${server_pid}" 2>/dev/null || true)
+    if [[ -z "${server_state}" || "${server_state}" == Z* ]]; then
+      rm -f -- "${pid_file}" "${active_run_file}"
+      echo "Endpoint stopped."
+      exit 0
+    fi
+    sleep 0.5
+  done
+
+  echo "Endpoint did not stop within 30 seconds; PID ${server_pid} is still running." >&2
+  exit 1
+fi
 
 if [[ -z "${model_path}" ]]; then
   echo "--model must name the source-model directory." >&2
@@ -165,6 +209,8 @@ nohup env \
   >"${server_log}" 2>&1 &
 server_pid=$!
 printf '%s\n' "${server_pid}" >"${result_dir}/server.pid"
+printf '%s\n' "${server_pid}" >"${pid_file}"
+printf '%s\n' "${result_dir}" >"${active_run_file}"
 
 for _ in $(seq 1 180); do
   if curl -fsS --max-time 2 "${health_url}" >/dev/null 2>&1; then
@@ -173,6 +219,7 @@ for _ in $(seq 1 180); do
     exit 0
   fi
   if ! kill -0 "${server_pid}" >/dev/null 2>&1; then
+    rm -f -- "${pid_file}" "${active_run_file}"
     echo "Endpoint process exited during startup." >&2
     tail -200 "${server_log}" >&2 || true
     exit 1
@@ -180,6 +227,7 @@ for _ in $(seq 1 180); do
   sleep 5
 done
 
+rm -f -- "${pid_file}" "${active_run_file}"
 echo "Endpoint did not become ready within 15 minutes." >&2
 tail -200 "${server_log}" >&2 || true
 exit 1

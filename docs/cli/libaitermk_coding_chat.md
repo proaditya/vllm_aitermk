@@ -16,7 +16,7 @@ Install the pinned Pi dependencies once:
 
 ```bash
 cd tools/libaitermk/pi
-npm ci --omit=optional --ignore-scripts
+npm ci --ignore-scripts
 cd ../../..
 ```
 
@@ -46,8 +46,11 @@ Check the endpoint with:
 curl -fsS http://127.0.0.1:8000/health
 ```
 
-The launcher prints the run directory. Stop that server with
-`kill "$(cat <run-directory>/server.pid)"`.
+The launcher prints the run directory. Stop the managed endpoint cleanly with:
+
+```bash
+tools/libaitermk/start_endpoint.sh --stop
+```
 
 ## Start Pi
 
@@ -105,3 +108,60 @@ page boundaries can reduce an individual call to K1.
 `--stats` loads the pinned live speed-meter extension and records authoritative
 endpoint-usage metrics in `.cache/libaitermk/pi/metrics.jsonl`. Short responses
 produce noisy TPOT; use a sufficiently long output when measuring decode speed.
+
+## Start the browser demo
+
+The browser dashboard can run in two modes. Use Pi mode for coding-agent work;
+direct mode bypasses Pi and is only useful for testing the endpoint itself. In
+Pi mode, prompts travel from the browser through the Node.js demo bridge to Pi
+RPC, then through the `libaitermk-vllm` provider to vLLM. Pi remains responsible
+for the coding prompt, conversation state, tools, and permission requests.
+
+Install the dependencies from the prerequisite section and start the vLLM
+endpoint. Then, from a second terminal inside the same GPU container, run:
+
+```bash
+cd /workspace/vllm
+tools/libaitermk/start_pi_browser.sh "$PWD"
+```
+
+The launcher runs in the foreground and prints a tokenized URL such as
+`http://127.0.0.1:8790/#token=...`. It starts the same Pi coding agent as the
+terminal launcher, using RPC mode instead of the terminal UI. Press Ctrl+C in
+that terminal to stop both the browser bridge and its Pi child cleanly.
+
+Writes and shell commands still require browser confirmation by default. The
+same optional permissions are available on the browser launcher:
+
+```bash
+tools/libaitermk/start_pi_browser.sh "$PWD" \
+  --dangerously-skip-permissions \
+  --web-access
+```
+
+The bridge listens on port 8790 inside the GPU container but is not published
+as a public host port. On the remote host, set the actual container name and
+obtain its private IP:
+
+```bash
+VLLM_CONTAINER=YOUR_VLLM_CONTAINER_NAME
+docker inspect \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+  "${VLLM_CONTAINER}"
+```
+
+From the local computer, forward port 8790 to the printed container IP:
+
+```bash
+ssh -N -L 8790:CONTAINER_IP:8790 USER@REMOTE_HOST
+```
+
+Open the complete tokenized URL in the local browser. The SSH tunnel can remain
+running across bridge restarts, but every restart generates a new URL token.
+The browser session is fresh and ephemeral by default; pass `--persist` if the
+Pi session should be saved.
+
+The dashboard's live decode graph uses cumulative provider usage when vLLM
+returns it. This matters for multi-token decoding: one streamed text delta can
+contain several generated tokens, so counting deltas would under-report K8
+decode throughput by approximately eight times.

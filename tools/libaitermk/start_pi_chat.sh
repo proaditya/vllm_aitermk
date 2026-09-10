@@ -3,11 +3,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 WORKSPACE [--dangerously-skip-permissions] [--web-access] [Pi options]" >&2
-  exit 2
-fi
-
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/../.." && pwd)
 pi_dir=${script_dir}/pi
@@ -15,8 +10,16 @@ pi_entry=${pi_dir}/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.
 extension=${pi_dir}/libaitermk.ts
 speed_extension=${pi_dir}/node_modules/pi-token-speed/index.ts
 web_extension=${pi_dir}/node_modules/pi-agent-web-access/index.ts
-workspace=$1
-shift
+
+if [[ $# -gt 0 && $1 != -* ]]; then
+  workspace=$1
+  shift
+elif [[ -n ${PI_SPEED_DEMO_CWD:-} ]]; then
+  workspace=${PI_SPEED_DEMO_CWD}
+else
+  echo "Usage: $0 WORKSPACE [--dangerously-skip-permissions] [--web-access] [Pi options]" >&2
+  exit 2
+fi
 
 if [[ ! -d "${workspace}" ]]; then
   echo "Workspace does not exist or is not a directory: ${workspace}" >&2
@@ -30,7 +33,7 @@ context_window=${VLLM_CHAT_CONTEXT_WINDOW:-65536}
 write_policy=ask
 shell_policy=ask
 stats=${LIBAITERMK_PI_STATS:-0}
-web_access=0
+web_access=${LIBAITERMK_PI_WEB_ACCESS:-0}
 pi_args=()
 
 while [[ $# -gt 0 ]]; do
