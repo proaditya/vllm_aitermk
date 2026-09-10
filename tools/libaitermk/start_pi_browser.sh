@@ -4,25 +4,30 @@
 set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd -- "${script_dir}/../.." && pwd)
 pi_dir=${script_dir}/pi
 demo_dir=${pi_dir}/node_modules/pi-token-speed
 tsx=${pi_dir}/node_modules/.bin/tsx
 workspace=$PWD
+action=start
 port=${PI_SPEED_DEMO_PORT:-8790}
 write_policy=${LIBAITERMK_PI_WRITE_POLICY:-ask}
 shell_policy=${LIBAITERMK_PI_SHELL_POLICY:-ask}
 web_access=${LIBAITERMK_PI_WEB_ACCESS:-0}
 persist=${PI_SPEED_DEMO_PERSIST:-0}
+run_dir=${LIBAITERMK_PI_RUN_DIR:-${repo_root}/.cache/libaitermk/pi}
 
 usage() {
   cat <<EOF
 Usage: $0 [WORKSPACE] [options]
+       $0 --stop
 
 Options:
   --dangerously-skip-permissions  Allow Pi file writes and shell commands
   --web-access                    Enable Pi's read-only web tools
   --persist                       Save the Pi session instead of starting ephemeral
   --port PORT                     Browser bridge port (default: 8790)
+  --stop                          Stop the browser bridge started by this script
   -h, --help                      Show this help
 EOF
 }
@@ -55,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       port=${1#*=}
       shift
       ;;
+    --stop)
+      action=stop
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -66,6 +75,42 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+pid_file=${run_dir%/}/browser.pid
+
+if [[ "${action}" == "stop" ]]; then
+  if [[ ! -f "${pid_file}" ]]; then
+    echo "Pi browser is not running: no managed PID file at ${pid_file}"
+    exit 0
+  fi
+
+  IFS= read -r browser_pid <"${pid_file}"
+  if [[ ! "${browser_pid}" =~ ^[0-9]+$ ]] || ! kill -0 "${browser_pid}" 2>/dev/null; then
+    rm -f -- "${pid_file}"
+    echo "Pi browser is not running; removed stale launcher state."
+    exit 0
+  fi
+
+  browser_command=$(ps -o args= -p "${browser_pid}" 2>/dev/null || true)
+  if [[ "${browser_command}" != *"tsx"*"demo/server.ts"* ]]; then
+    echo "Refusing to stop PID ${browser_pid}: it is not a Pi browser started by this launcher." >&2
+    exit 1
+  fi
+
+  kill -INT "${browser_pid}"
+  for _ in $(seq 1 60); do
+    browser_state=$(ps -o stat= -p "${browser_pid}" 2>/dev/null || true)
+    if [[ -z "${browser_state}" || "${browser_state}" == Z* ]]; then
+      rm -f -- "${pid_file}"
+      echo "Pi browser stopped."
+      exit 0
+    fi
+    sleep 0.5
+  done
+
+  echo "Pi browser did not stop within 30 seconds; PID ${browser_pid} is still running." >&2
+  exit 1
+fi
 
 if [[ ! -d "${workspace}" ]]; then
   echo "Workspace does not exist or is not a directory: ${workspace}" >&2
@@ -97,8 +142,35 @@ export LIBAITERMK_PI_SHELL_POLICY=${shell_policy}
 export LIBAITERMK_PI_WEB_ACCESS=${web_access}
 export LIBAITERMK_PI_STATS=1
 
+mkdir -p "${run_dir}"
+if [[ -f "${pid_file}" ]]; then
+  IFS= read -r previous_pid <"${pid_file}"
+  if [[ "${previous_pid}" =~ ^[0-9]+$ ]] && kill -0 "${previous_pid}" 2>/dev/null; then
+    previous_command=$(ps -o args= -p "${previous_pid}" 2>/dev/null || true)
+    if [[ "${previous_command}" == *"tsx"*"demo/server.ts"* ]]; then
+      echo "Pi browser is already running with PID ${previous_pid}." >&2
+      exit 1
+    fi
+  fi
+  rm -f -- "${pid_file}"
+fi
+
 echo "Starting Pi browser bridge for workspace: ${workspace}" >&2
 echo "The bridge runs in this terminal; press Ctrl+C to stop it." >&2
 
 cd -- "${demo_dir}"
-exec "${tsx}" demo/server.ts
+"${tsx}" demo/server.ts &
+browser_pid=$!
+printf '%s\n' "${browser_pid}" >"${pid_file}"
+
+cleanup() {
+  if [[ -f "${pid_file}" ]]; then
+    IFS= read -r recorded_pid <"${pid_file}"
+    if [[ "${recorded_pid}" == "${browser_pid}" ]]; then
+      rm -f -- "${pid_file}"
+    fi
+  fi
+}
+trap cleanup EXIT
+
+wait "${browser_pid}"

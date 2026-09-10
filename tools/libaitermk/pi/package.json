@@ -11,7 +11,7 @@
     "@earendil-works/pi-coding-agent": "0.84.4",
     "@earendil-works/pi-tui": "0.84.4",
     "pi-agent-web-access": "1.1.2",
-    "pi-token-speed": "https://github.com/ssharma4-amd/decode-speed-meter/archive/a81f6e1da6052eb2225e8698ae1600e9a99c2503.tar.gz",
+    "pi-token-speed": "https://github.com/ssharma4-amd/decode-speed-meter/archive/951954acb00f0f942bfba4992e89bab3b688e6df.tar.gz",
     "tsx": "4.23.13"
   }
 }

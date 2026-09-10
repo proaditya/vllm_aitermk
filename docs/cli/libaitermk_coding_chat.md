@@ -130,6 +130,15 @@ The launcher runs in the foreground and prints a tokenized URL such as
 terminal launcher, using RPC mode instead of the terminal UI. Press Ctrl+C in
 that terminal to stop both the browser bridge and its Pi child cleanly.
 
+If that terminal is no longer available, stop the managed browser process from
+another terminal inside the same container:
+
+```bash
+tools/libaitermk/start_pi_browser.sh --stop
+```
+
+The stop command is idempotent and does not stop the vLLM endpoint.
+
 Writes and shell commands still require browser confirmation by default. The
 same optional permissions are available on the browser launcher:
 
